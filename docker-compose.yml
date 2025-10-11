@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  warden:
+    build: .
+    command: uvicorn sisf.api:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./sisf:/app/sisf
+
+  adjudicator:
+    build: .
+    command: echo "Adjudicator service placeholder" # Replace with actual run command later
+    volumes:
+      - ./sisf:/app/sisf
+
+  apa:
+    build: .
+    command: echo "APA service placeholder" # Replace with actual run command later
+    volumes:
+      - ./sisf:/app/sisf
+
+  psm:
+    build: .
+    command: echo "PSM service placeholder" # Replace with actual run command later
+    volumes:
+      - ./sisf:/app/sisf
+
+  oversight-ui:
+    build: .
+    command: streamlit run sisf/components/oversight_app.py --server.port 8501 --server.address 0.0.0.0
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./sisf:/app/sisf

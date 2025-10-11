@@ -1,0 +1,10 @@
+project_name: "SISF"
+version: "0.1.0"
+
+models:
+  warden_llm: "meta-llama/Llama-3-8B"
+  adjudicator_llm: "openai/gpt-4o"
+
+api:
+  host: "0.0.0.0"
+  port: 8000
