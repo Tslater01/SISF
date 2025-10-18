@@ -8,10 +8,30 @@ from sisf.schemas.policies import Policy, PolicyAction, HeuristicPolicy, Embeddi
 from sisf.utils.policy_store import PolicyStore
 
 class MockEmbeddingModel:
-    """Mock for sentence_transformers.SentenceTransformer"""
+    """
+    A more realistic mock for sentence_transformers.SentenceTransformer.
+    It uses a predefined vocabulary to create deterministic, testable embeddings.
+    """
+    def __init__(self):
+        self.vocab = {
+            # Friendly
+            "hello": [1.0, 0.0, 0.0],
+            "hi": [0.9, 0.1, 0.0],
+            # Unfriendly
+            "goodbye": [0.0, 1.0, 0.0],
+            "bye": [0.1, 0.9, 0.0],
+            # Forbidden
+            "secret": [0.0, 0.0, 1.0],
+            "classified": [0.0, 0.1, 0.9]
+        }
+        self.unknown_vector = [0.33, 0.33, 0.33]
+
     def encode(self, text: str) -> List[float]:
-        val = hash(text) % 2
-        return [float(val), float(1-val)]
+        # Simple logic: find the first known word
+        for word, vector in self.vocab.items():
+            if word in text.lower():
+                return vector
+        return self.unknown_vector
     
     def cos_sim(self, a: List[float], b: List[float]) -> float:
         dot_product = sum(x*y for x, y in zip(a, b))
@@ -32,47 +52,55 @@ class Warden:
         self.embedding_model = MockEmbeddingModel()
         print("Warden initialized.")
 
-    def _apply_policies(self, prompt: str) -> Tuple[PolicyAction, Optional[Policy]]:
+    def _apply_policies(self, prompt: str) -> Tuple[PolicyAction, Optional[Policy], str]:
         """
         The core enforcement logic. Checks a prompt against all active policies.
-        Returns the highest-priority action and the policy that triggered it.
+        Returns the highest-priority action, the triggering policy, and the (potentially modified) prompt.
         Priority: BLOCK > REWRITE > FLAG_FOR_REVIEW > ALLOW.
         """
         active_policies = self.policy_store.get_active_policies()
         triggered_actions: Dict[PolicyAction, Policy] = {}
+        
+        modified_prompt = prompt
 
+        # First pass for REWRITE policies
+        for policy in active_policies:
+            if isinstance(policy, RewritePolicy):
+                if re.search(policy.match_pattern, modified_prompt):
+                    modified_prompt = re.sub(policy.match_pattern, policy.rewrite_template, modified_prompt)
+                    triggered_actions[PolicyAction.REWRITE] = policy
+
+        # Second pass for BLOCK and FLAG on the *final* version of the prompt
         for policy in active_policies:
             triggered = False
             if isinstance(policy, HeuristicPolicy):
-                if re.search(policy.regex_pattern, prompt):
+                if re.search(policy.regex_pattern, modified_prompt):
                     triggered = True
             elif isinstance(policy, EmbeddingSimilarityPolicy):
-                prompt_embedding = self.embedding_model.encode(prompt)
+                prompt_embedding = self.embedding_model.encode(modified_prompt)
                 sim = self.embedding_model.cos_sim(prompt_embedding, policy.reference_embedding)
                 if sim >= policy.similarity_threshold:
                     triggered = True
-            elif isinstance(policy, RewritePolicy):
-                # Placeholder for Phase 2
-                pass
             
             if triggered:
-                triggered_actions[policy.action] = policy
+                if policy.action in [PolicyAction.BLOCK, PolicyAction.FLAG_FOR_REVIEW]:
+                    triggered_actions[policy.action] = policy
         
         if PolicyAction.BLOCK in triggered_actions:
-            return PolicyAction.BLOCK, triggered_actions[PolicyAction.BLOCK]
+            return PolicyAction.BLOCK, triggered_actions[PolicyAction.BLOCK], modified_prompt
         if PolicyAction.REWRITE in triggered_actions:
-            return PolicyAction.REWRITE, triggered_actions[PolicyAction.REWRITE]
+            return PolicyAction.REWRITE, triggered_actions[PolicyAction.REWRITE], modified_prompt
         if PolicyAction.FLAG_FOR_REVIEW in triggered_actions:
-            return PolicyAction.FLAG_FOR_REVIEW, triggered_actions[PolicyAction.FLAG_FOR_REVIEW]
+            return PolicyAction.FLAG_FOR_REVIEW, triggered_actions[PolicyAction.FLAG_FOR_REVIEW], modified_prompt
             
-        return PolicyAction.ALLOW, None
+        return PolicyAction.ALLOW, None, modified_prompt
 
     def process(self, prompt: str) -> Dict[str, Any]:
         """
         The main public-facing method.
         Applies policies, then (if allowed) queries the base LLM.
         """
-        action, triggering_policy = self._apply_policies(prompt)
+        action, triggering_policy, final_prompt = self._apply_policies(prompt)
         
         if action == PolicyAction.BLOCK:
             print(f"Warden: Request BLOCKED by policy {triggering_policy.id}")
@@ -88,12 +116,17 @@ class Warden:
             print(f"Warden: Request FLAGGED by policy {triggering_policy.id}")
             flagged_by = triggering_policy.id
         
+        if action == PolicyAction.REWRITE:
+            print(f"Warden: Request REWRITTEN by policy {triggering_policy.id}")
+        
         print(f"Warden: Request ALLOWED. Processing with base LLM...")
-        response_text = f"This is a MOCK response from the Warden's base LLM for the prompt: '{prompt}'"
+        response_text = f"This is a MOCK response from the Warden's base LLM for the prompt: '{final_prompt}'"
         
         return {
             "status": "ALLOWED",
             "response": response_text,
-            "policy_id": None,
+            "original_prompt": prompt,
+            "final_prompt": final_prompt,
+            "policy_id": triggering_policy.id if action == PolicyAction.REWRITE else None,
             "flagged_by_policy_id": flagged_by
         }
