@@ -3,9 +3,10 @@
 Main API entrypoint for the SISF.
 """
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel  
 import os
 from typing import List, Optional
+from dotenv import load_dotenv
 
 from sisf.components.warden import Warden
 from sisf.components.adjudicator import EnsembleAdjudicator, AdjudicationResult
@@ -14,21 +15,40 @@ from sisf.components.apa import AdversarialProbingAgent
 from sisf.utils.policy_store import PolicyStore
 from sisf.schemas.policies import Policy
 
+# --- Load environment variables from .env file ---
+load_dotenv()
+
 # --- Global Singletons ---
 app = FastAPI(
     title="Self-Improving Safety Framework (SISF)",
     description="A reference implementation of the SISF architecture."
 )
 
+# --- Configuration Loading ---
+# Load the API key from the .env file
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY environment variable not set.")
+    raise ValueError("OPENAI_API_KEY not found. Make sure it's set in your .env file.")
 
-policy_store = PolicyStore()
-warden = Warden(model_name="meta-llama/Llama-3-8B", policy_store=policy_store)
-adjudicator = EnsembleAdjudicator(api_key=OPENAI_API_KEY, model="gpt-4o")
-psm = PolicySynthesisModule(api_key=OPENAI_API_KEY, model="gpt-4-turbo")
-apa = AdversarialProbingAgent(api_key=OPENAI_API_KEY, model="gpt-4")
+# IMPROVEMENT: Load model names from .env file with sensible defaults
+ADJUDICATOR_MODEL = os.getenv("ADJUDICATOR_MODEL", "gpt-4o")
+PSM_MODEL = os.getenv("PSM_MODEL", "gpt-4-turbo")
+APA_MODEL = os.getenv("APA_MODEL", "gpt-4o") 
+
+print("--- SISF Configuration ---")
+print(f"Adjudicator Model: {ADJUDICATOR_MODEL}")
+print(f"PSM Model:         {PSM_MODEL}")
+print(f"APA Model:         {APA_MODEL}")
+print("--------------------------")
+
+# --- Component Initialization ---
+# IMPROVEMENT: Add type hints for clarity
+policy_store: PolicyStore = PolicyStore()
+warden: Warden = Warden(model_name="meta-llama/Llama-3-8B", policy_store=policy_store)
+adjudicator: EnsembleAdjudicator = EnsembleAdjudicator(api_key=OPENAI_API_KEY, model=ADJUDICATOR_MODEL)
+psm: PolicySynthesisModule = PolicySynthesisModule(api_key=OPENAI_API_KEY, model=PSM_MODEL)
+apa: AdversarialProbingAgent = AdversarialProbingAgent(api_key=OPENAI_API_KEY, model=APA_MODEL)
+
 
 # --- 1. Public-Facing API ---
 class ChatRequest(BaseModel):
@@ -44,7 +64,7 @@ async def handle_chat(request: ChatRequest):
     """The main endpoint for users to interact with the protected Warden LLM."""
     result = warden.process(request.prompt)
     return ChatResponse(
-        status=result["status"], 
+        status=result["status"],
         response=result["response"],
         policy_id=result.get("policy_id")
     )
@@ -60,16 +80,16 @@ class LoopCycleResponse(BaseModel):
 async def run_adaptive_cycle():
     """Executes a single cycle of the self-improvement loop."""
     print("\n--- SISF: Starting new adaptive cycle ---")
-    
+
     prompt = apa.generate_prompt()
     warden_output = warden.process(prompt)
     adjudication = adjudicator.analyze(prompt, warden_output["response"])
-    
+
     new_policy_obj = None
     if adjudication.is_breach:
         print("SISF: Breach detected! Engaging PSM.")
         new_policy_obj = psm.synthesize_policy(prompt, warden_output["response"], adjudication)
-        
+
         if new_policy_obj:
             policy_store.add_policy(new_policy_obj, activate=True)
             print(f"SISF: New policy {new_policy_obj.id} added and activated.")
@@ -77,9 +97,9 @@ async def run_adaptive_cycle():
             print("SISF: PSM failed to generate a new policy.")
     else:
         print("SISF: No breach detected. Cycle complete.")
-    
+
     print("--- SISF: Adaptive cycle finished ---")
-    
+
     return LoopCycleResponse(
         status="BREACH_MITIGATED" if new_policy_obj else "NO_BREACH",
         apa_prompt=prompt,
