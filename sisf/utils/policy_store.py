@@ -31,7 +31,7 @@ class PolicyStore:
 
     def get_active_policies(self) -> List[Policy]:
         """Returns a list of all currently active policies."""
-        with self._lock: # <-- FIX: was self.lock
+        with self._lock:
             return [self._policies[pid] for pid in self._active_policy_ids if pid in self._policies]
             
     def get_all_policies(self) -> List[Policy]:
