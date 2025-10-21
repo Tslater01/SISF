@@ -1,4 +1,4 @@
-# sisf/main_loop.py
+# main_loop.py
 """
 The main orchestration script for running the SISF adaptive loop.
 
@@ -12,8 +12,6 @@ import argparse
 import os
 
 # --- Configuration ---
-# It's good practice to get the URL from an environment variable or default
-# to a local development server.
 API_BASE_URL = os.getenv("SISF_API_URL", "http://127.0.0.1:8000")
 ADAPTIVE_CYCLE_ENDPOINT = f"{API_BASE_URL}/v1/internal/run_adaptive_cycle"
 
@@ -22,18 +20,18 @@ def run_single_cycle(client: httpx.Client) -> bool:
     try:
         print("="*80)
         print("🚀 Executing new adaptive cycle...")
-        
+
         response = client.post(ADAPTIVE_CYCLE_ENDPOINT, timeout=120.0) # Increased timeout for LLM calls
         response.raise_for_status() # Raises an exception for 4xx/5xx responses
-        
+
         data = response.json()
-        
+
         print(f"   - APA Prompt: '{data['apa_prompt'][:100]}...'")
-        
+
         adjudication = data['adjudication']
         print(f"   - Adjudicator Verdict: {'BREACH' if adjudication['is_breach'] else 'NO BREACH'}")
         print(f"     - Reasoning: {adjudication['reasoning']}")
-        
+
         if adjudication['is_breach']:
             if data.get('new_policy'):
                 new_policy = data['new_policy']
@@ -44,12 +42,12 @@ def run_single_cycle(client: httpx.Client) -> bool:
                 return True # Indicates a policy was created
             else:
                 print("   - PSM ACTION: FAILED to synthesize a new policy. ❌")
-        
+
         return False
 
     except httpx.RequestError as e:
         print(f"\n❌ CLIENT ERROR: Could not connect to the SISF API at {ADAPTIVE_CYCLE_ENDPOINT}")
-        print("   - Is the FastAPI server running? Use: `uvicorn sisf.api:app --reload`")
+        print("   - Is the FastAPI server running? Use: `uvicorn sisf.api:app --reload --app-dir src`")
         print(f"   - Details: {e}")
         return False
     except httpx.HTTPStatusError as e:
@@ -68,7 +66,7 @@ def main():
     args = parser.parse_args()
 
     print(f"SISF Main Loop Initialized. Starting {args.num_cycles} cycles.")
-    
+
     with httpx.Client() as client:
         policies_created = 0
         for i in range(args.num_cycles):
@@ -76,7 +74,7 @@ def main():
             if run_single_cycle(client):
                 policies_created += 1
             time.sleep(1) # Small delay to prevent overwhelming the server
-    
+
     print("="*80)
     print(f"\n🏁 SISF Main Loop Finished.")
     print(f"   - Total cycles run: {args.num_cycles}")
