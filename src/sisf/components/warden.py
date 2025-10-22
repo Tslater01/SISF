@@ -1,9 +1,12 @@
-# sisf/components/warden.py
+# src/sisf/components/warden.py
 """
 Implements the Warden, the protected LLM service.
 """
 import re
 from typing import Dict, Any, List, Tuple, Optional
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
 from sisf.schemas.policies import Policy, PolicyAction, HeuristicPolicy, EmbeddingSimilarityPolicy, RewritePolicy
 from sisf.utils.policy_store import PolicyStore
 
@@ -44,18 +47,27 @@ class MockEmbeddingModel:
 class Warden:
     """The protected LLM service."""
     def __init__(self, model_name: str, policy_store: PolicyStore):
-        print(f"Initializing Warden with model: {model_name}")
-        print(f"NOTE: Using MOCK LLM for Phase 1. Real model '{model_name}' is commented out.")
-        self.model = None
-        self.tokenizer = None
+        print(f"Initializing Warden with REAL model: {model_name}")
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"Using device: {self.device}")
+
+        # --- NEW: Load a real LLM and Tokenizer from Hugging Face ---
+        # Note: This will download several gigabytes the first time it's run.
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.float16,  # Use float16 for less memory
+            device_map="auto"           # Automatically use GPU if available
+        )
+        # --- END OF NEW CODE ---
+        
         self.policy_store = policy_store
-        self.embedding_model = MockEmbeddingModel()
-        print("Warden initialized.")
+        self.embedding_model = MockEmbeddingModel() # We will replace this in a later step
+        print("Warden initialized with real LLM.")
 
     def _apply_policies(self, prompt: str) -> Tuple[PolicyAction, Optional[Policy], str]:
         """
         The core enforcement logic. Checks a prompt against all active policies.
-        Returns the highest-priority action, the triggering policy, and the (potentially modified) prompt.
         Priority: BLOCK > REWRITE > FLAG_FOR_REVIEW > ALLOW.
         """
         active_policies = self.policy_store.get_active_policies()
@@ -120,7 +132,32 @@ class Warden:
             print(f"Warden: Request REWRITTEN by policy {triggering_policy.id}")
         
         print(f"Warden: Request ALLOWED. Processing with base LLM...")
-        response_text = f"This is a MOCK response from the Warden's base LLM for the prompt: '{final_prompt}'"
+        
+        # --- NEW: REAL LLM INFERENCE ---
+        messages = [
+            {"role": "system", "content": "You are a helpful AI assistant."},
+            {"role": "user", "content": final_prompt}
+        ]
+        
+        # Prepare the input for the model
+        inputs = self.tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            return_tensors="pt"
+        ).to(self.model.device)
+
+        # Generate a response
+        outputs = self.model.generate(
+            inputs,
+            max_new_tokens=256,
+            do_sample=True,
+            temperature=0.6,
+            top_p=0.9,
+        )
+        
+        # Decode the response and remove the input prompt part
+        response_text = self.tokenizer.decode(outputs[0][inputs.shape[-1]:], skip_special_tokens=True)
+        # --- END OF NEW CODE ---
         
         return {
             "status": "ALLOWED",

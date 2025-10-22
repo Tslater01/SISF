@@ -21,7 +21,7 @@ def run_single_cycle(client: httpx.Client) -> bool:
         print("="*80)
         print("🚀 Executing new adaptive cycle...")
 
-        response = client.post(ADAPTIVE_CYCLE_ENDPOINT, timeout=120.0) # Increased timeout for LLM calls
+        response = client.post(ADAPTIVE_CYCLE_ENDPOINT, timeout=600.0) 
         response.raise_for_status() # Raises an exception for 4xx/5xx responses
 
         data = response.json()

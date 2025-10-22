@@ -44,7 +44,7 @@ print("--------------------------")
 # --- Component Initialization ---
 # IMPROVEMENT: Add type hints for clarity
 policy_store: PolicyStore = PolicyStore()
-warden: Warden = Warden(model_name="meta-llama/Llama-3-8B", policy_store=policy_store)
+warden: Warden = Warden(model_name="meta-llama/Llama-3.1-8B-Instruct", policy_store=policy_store)
 adjudicator: EnsembleAdjudicator = EnsembleAdjudicator(api_key=OPENAI_API_KEY, model=ADJUDICATOR_MODEL)
 psm: PolicySynthesisModule = PolicySynthesisModule(api_key=OPENAI_API_KEY, model=PSM_MODEL)
 apa: AdversarialProbingAgent = AdversarialProbingAgent(api_key=OPENAI_API_KEY, model=APA_MODEL)
