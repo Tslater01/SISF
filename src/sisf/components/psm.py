@@ -7,12 +7,13 @@ from typing import Optional, Union
 import pydantic
 from openai import OpenAI
 from pydantic import ValidationError, TypeAdapter
+from sentence_transformers import SentenceTransformer  # <-- CORRECT IMPORT
 
+# REMOVED the broken import: from sisf.components.warden import MockEmbeddingModel
 from sisf.schemas.policies import EmbeddingSimilarityPolicy, HeuristicPolicy, PolicyAction, Policy
 from sisf.components.adjudicator import AdjudicationResult
-from sisf.components.warden import MockEmbeddingModel
 
-# The system prompt is already excellent, no changes needed.
+# --- System Prompt Remains the Same ---
 PSM_SYSTEM_PROMPT = """
 You are an expert AI Safety Policy Synthesizer. Your task is to analyze a "breach context"
 and generate a *new, general* safety policy in valid JSON format to prevent this type of failure in the future.
@@ -46,8 +47,15 @@ class PolicySynthesisModule:
         print(f"Initializing PSM with model: {model}")
         self.client = OpenAI(api_key=api_key)
         self.model = model
-        self.embedding_model = MockEmbeddingModel()
+
+        # --- UPDATED: Use the real embedding model ---
+        print("PSM is loading its own embedding model (all-MiniLM-L6-v2)...")
+        # Note: We load a separate instance here. In a production system, you might share one.
+        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        print("PSM embedding model loaded.")
+
         self.fallback_threshold = fallback_threshold
+        # Use TypeAdapter for robust Pydantic V2 parsing
         self.policy_adapter = TypeAdapter(Union[HeuristicPolicy, EmbeddingSimilarityPolicy])
 
     def synthesize_policy(self, prompt: str, response: str, adjudication: AdjudicationResult) -> Optional[Policy]:
@@ -62,18 +70,21 @@ class PolicySynthesisModule:
                 messages=[{"role": "system", "content": PSM_SYSTEM_PROMPT}, {"role": "user", "content": json.dumps(breach_context)}]
             )
             response_json_str = completion.choices[0].message.content
-            
+
             # 1. Parse the raw JSON from the LLM into a dictionary
             response_data = json.loads(response_json_str)
 
             # 2. Add the required fields that our code is responsible for
             response_data["description"] = f"Auto-synthesized policy for breach: {adjudication.failure_category.value}"
             if response_data.get("type") == "EMBEDDING_SIMILARITY":
-                response_data["reference_embedding"] = self.embedding_model.encode(prompt)
+                # --- UPDATED: Use the real model's encode method ---
+                # Encode the prompt that caused the breach
+                embedding = self.embedding_model.encode(prompt)
+                # Convert numpy array to list for JSON serialization
+                response_data["reference_embedding"] = embedding.tolist()
 
-            # 3. Now, validate the *complete* data object
+            # 3. Now, validate the *complete* data object using the TypeAdapter
             new_policy = self.policy_adapter.validate_python(response_data)
-            # --- END OF FIX ---
 
             print(f"PSM: Successfully synthesized new policy. Type: {new_policy.type}, ID: {new_policy.id}")
             return new_policy
@@ -82,19 +93,21 @@ class PolicySynthesisModule:
             print("PSM: ERROR! LLM generated invalid policy JSON that failed validation.")
             print("--- Invalid Raw JSON from Model ---"); print(response_json_str)
             print("--- Pydantic Validation Error ---"); print(e); print("------------------------------------")
-            return self._create_fallback_policy(prompt)
+            return self._create_fallback_policy(prompt) # Use fallback on JSON error
         except Exception as e:
             print("PSM: ERROR! An unknown failure occurred during synthesis.")
             print("--- Raw Response from Model (if available) ---"); print(response_json_str)
             print("--- Exception Details ---"); print(e); print("------------------------------------")
-            return None
+            return None # Return None on critical/unexpected failure
 
     def _create_fallback_policy(self, prompt: str) -> EmbeddingSimilarityPolicy:
         """This is our 'Contingency' for Risk 1."""
         print("PSM: Executing Fallback Contingency. Creating simple embedding policy.")
+        # --- UPDATED: Use the real model's encode method ---
+        embedding = self.embedding_model.encode(prompt)
         return EmbeddingSimilarityPolicy(
             description="Fallback: Block prompts semantically similar to this one.",
             action=PolicyAction.BLOCK,
-            reference_embedding=self.embedding_model.encode(prompt),
+            reference_embedding=embedding.tolist(), # Convert numpy array to list for JSON
             similarity_threshold=self.fallback_threshold
         )
