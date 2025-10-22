@@ -11,8 +11,6 @@ from sentence_transformers import SentenceTransformer, util # <-- NEW IMPORT
 from sisf.schemas.policies import Policy, PolicyAction, HeuristicPolicy, EmbeddingSimilarityPolicy, RewritePolicy
 from sisf.utils.policy_store import PolicyStore
 
-# --- The MockEmbeddingModel class is now REMOVED ---
-
 class Warden:
     """The protected LLM service."""
     def __init__(self, model_name: str, policy_store: PolicyStore):
@@ -20,7 +18,6 @@ class Warden:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {self.device}")
 
-        # --- Load the real LLM and Tokenizer ---
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
@@ -31,9 +28,9 @@ class Warden:
         self.policy_store = policy_store
         
         # --- NEW: Load a real Sentence Transformer model ---
-        print("Loading real embedding model (all-MiniLM-L6-v2)...")
+        print("Warden is loading real embedding model (all-MiniLM-L6-v2)...")
         self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2', device=self.device)
-        print("Embedding model loaded.")
+        print("Warden embedding model loaded.")
         
         print("Warden initialized with real LLM and real embedding model.")
 
@@ -52,19 +49,21 @@ class Warden:
                     modified_prompt = re.sub(policy.match_pattern, policy.rewrite_template, modified_prompt)
                     triggered_actions[PolicyAction.REWRITE] = policy
 
+        # Calculate prompt embedding once if needed
+        prompt_embedding = None
+        has_semantic_policy = any(isinstance(p, EmbeddingSimilarityPolicy) for p in active_policies)
+        if has_semantic_policy:
+            prompt_embedding = self.embedding_model.encode(modified_prompt, convert_to_tensor=True)
+
         for policy in active_policies:
             triggered = False
             if isinstance(policy, HeuristicPolicy):
                 if re.search(policy.regex_pattern, modified_prompt): triggered = True
             elif isinstance(policy, EmbeddingSimilarityPolicy):
-                # --- UPDATED: Use the real embedding model for semantic analysis ---
-                prompt_embedding = self.embedding_model.encode(modified_prompt, convert_to_tensor=True)
-                # Convert the stored list to a tensor for comparison
+                # Use the pre-calculated embedding
                 ref_embedding = torch.tensor(policy.reference_embedding).to(self.device)
-                
                 sim_scores = util.cos_sim(prompt_embedding, ref_embedding)
-                sim = sim_scores[0][0].item() # Extract the single float value
-                
+                sim = sim_scores[0][0].item()
                 if sim >= policy.similarity_threshold: triggered = True
             
             if triggered and policy.action in [PolicyAction.BLOCK, PolicyAction.FLAG_FOR_REVIEW]:
@@ -81,27 +80,17 @@ class Warden:
         action, triggering_policy, final_prompt = self._apply_policies(prompt)
         
         if action == PolicyAction.BLOCK:
-            print(f"Warden: Request BLOCKED by policy {triggering_policy.id}")
-            return {
-                "status": "BLOCKED",
-                "response": "This request was blocked by a safety policy.",
-                "policy_id": triggering_policy.id,
-                "policy_description": triggering_policy.description
-            }
+            return {"status": "BLOCKED", "response": "This request was blocked by a safety policy.", "policy_id": triggering_policy.id, "policy_description": triggering_policy.description}
         
         flagged_by = None
-        if action == PolicyAction.FLAG_FOR_REVIEW: 
-            print(f"Warden: Request FLAGGED by policy {triggering_policy.id}")
-            flagged_by = triggering_policy.id
-        if action == PolicyAction.REWRITE: 
-            print(f"Warden: Request REWRITTEN by policy {triggering_policy.id}")
+        if action == PolicyAction.FLAG_FOR_REVIEW: flagged_by = triggering_policy.id
+        if action == PolicyAction.REWRITE: print(f"Warden: Request REWRITTEN by policy {triggering_policy.id}")
         
         print(f"Warden: Request ALLOWED. Processing with base LLM...")
         
         messages = [{"role": "system", "content": "You are a helpful AI assistant."}, {"role": "user", "content": final_prompt}]
         
         inputs = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt").to(self.model.device)
-
         outputs = self.model.generate(inputs, max_new_tokens=256, do_sample=True, temperature=0.6, top_p=0.9)
         response_text = self.tokenizer.decode(outputs[0][inputs.shape[-1]:], skip_special_tokens=True)
         
