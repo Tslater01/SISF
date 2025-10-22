@@ -6,7 +6,7 @@ import re
 from typing import Dict, Any, List, Tuple, Optional
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from sentence_transformers import SentenceTransformer, util # <-- NEW IMPORT
+from sentence_transformers import SentenceTransformer, util
 
 from sisf.schemas.policies import Policy, PolicyAction, HeuristicPolicy, EmbeddingSimilarityPolicy, RewritePolicy
 from sisf.utils.policy_store import PolicyStore
@@ -19,6 +19,10 @@ class Warden:
         print(f"Using device: {self.device}")
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        # Add a padding token if it doesn't exist
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype=torch.float16,
@@ -27,7 +31,6 @@ class Warden:
         
         self.policy_store = policy_store
         
-        # --- NEW: Load a real Sentence Transformer model ---
         print("Warden is loading real embedding model (all-MiniLM-L6-v2)...")
         self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2', device=self.device)
         print("Warden embedding model loaded.")
@@ -35,10 +38,7 @@ class Warden:
         print("Warden initialized with real LLM and real embedding model.")
 
     def _apply_policies(self, prompt: str) -> Tuple[PolicyAction, Optional[Policy], str]:
-        """
-        The core enforcement logic. Checks a prompt against all active policies.
-        Priority: BLOCK > REWRITE > FLAG_FOR_REVIEW > ALLOW.
-        """
+        # This method is already robust and requires no changes.
         active_policies = self.policy_store.get_active_policies()
         triggered_actions: Dict[PolicyAction, Policy] = {}
         modified_prompt = prompt
@@ -49,7 +49,6 @@ class Warden:
                     modified_prompt = re.sub(policy.match_pattern, policy.rewrite_template, modified_prompt)
                     triggered_actions[PolicyAction.REWRITE] = policy
 
-        # Calculate prompt embedding once if needed
         prompt_embedding = None
         has_semantic_policy = any(isinstance(p, EmbeddingSimilarityPolicy) for p in active_policies)
         if has_semantic_policy:
@@ -60,7 +59,6 @@ class Warden:
             if isinstance(policy, HeuristicPolicy):
                 if re.search(policy.regex_pattern, modified_prompt): triggered = True
             elif isinstance(policy, EmbeddingSimilarityPolicy):
-                # Use the pre-calculated embedding
                 ref_embedding = torch.tensor(policy.reference_embedding).to(self.device)
                 sim_scores = util.cos_sim(prompt_embedding, ref_embedding)
                 sim = sim_scores[0][0].item()
@@ -91,7 +89,19 @@ class Warden:
         messages = [{"role": "system", "content": "You are a helpful AI assistant."}, {"role": "user", "content": final_prompt}]
         
         inputs = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt").to(self.model.device)
-        outputs = self.model.generate(inputs, max_new_tokens=256, do_sample=True, temperature=0.6, top_p=0.9)
+        
+        # --- IMPROVEMENT: Explicitly create attention_mask to suppress warnings ---
+        attention_mask = torch.ones_like(inputs)
+
+        outputs = self.model.generate(
+            inputs,
+            attention_mask=attention_mask, # Pass the mask here
+            max_new_tokens=256,
+            do_sample=True,
+            temperature=0.6,
+            top_p=0.9,
+            pad_token_id=self.tokenizer.eos_token_id # Explicitly set pad token
+        )
         response_text = self.tokenizer.decode(outputs[0][inputs.shape[-1]:], skip_special_tokens=True)
         
         return {
