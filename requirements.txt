@@ -64,7 +64,6 @@ scikit-learn==1.7.2
 scipy==1.16.2
 sentence-transformers==5.1.2
 setuptools==80.9.0
--e git+https://github.com/Tslater01/SISF.git@d554e69df5dde6dc98c780351aeba52f6d4c75ad#egg=sisf
 six==1.17.0
 smmap==5.0.2
 sniffio==1.3.1
