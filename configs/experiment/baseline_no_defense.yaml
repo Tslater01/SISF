@@ -1,0 +1,10 @@
+# configs/experiment/baseline_no_defense.yaml
+
+name: "Baseline_No_Defense_Evaluation"
+description: "Evaluates the unprotected Warden LLM to establish baseline vulnerability."
+
+# This key tells run_experiment.py to use the 'NoDefenseSystem' class
+defense_system_type: "no_defense"
+
+# This system doesn't call an external API, but we keep the key for consistency
+api_endpoint: "http://localhost:8000"

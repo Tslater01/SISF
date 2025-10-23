@@ -1,4 +1,4 @@
-# configs/config.yaml
+# configs/experiment/config.yaml
 
 # This tells Hydra which "knobs" to use by default.
 # We're telling it to use the settings in this file, plus the
@@ -13,5 +13,5 @@ data:
   benign_path: "data/processed/hh_rlhf_subset.csv"
 
 # General parameters for all experiments
-num_prompts_to_test: 1000  # How many prompts to evaluate from each dataset
+num_prompts_to_test: 520 # How many prompts to evaluate from each dataset
 output_dir: "outputs"     # A folder where all our raw CSV results will be saved

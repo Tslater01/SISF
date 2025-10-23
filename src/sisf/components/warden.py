@@ -1,6 +1,7 @@
 # src/sisf/components/warden.py
 """
 Implements the Warden, the protected LLM service.
+This is the pure, non-simulated version for real-world experiments.
 """
 import re
 from typing import Dict, Any, List, Tuple, Optional
@@ -19,7 +20,6 @@ class Warden:
         print(f"Using device: {self.device}")
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        # Add a padding token if it doesn't exist
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
@@ -34,11 +34,9 @@ class Warden:
         print("Warden is loading real embedding model (all-MiniLM-L6-v2)...")
         self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2', device=self.device)
         print("Warden embedding model loaded.")
-        
         print("Warden initialized with real LLM and real embedding model.")
 
     def _apply_policies(self, prompt: str) -> Tuple[PolicyAction, Optional[Policy], str]:
-        # This method is already robust and requires no changes.
         active_policies = self.policy_store.get_active_policies()
         triggered_actions: Dict[PolicyAction, Policy] = {}
         modified_prompt = prompt
@@ -50,8 +48,7 @@ class Warden:
                     triggered_actions[PolicyAction.REWRITE] = policy
 
         prompt_embedding = None
-        has_semantic_policy = any(isinstance(p, EmbeddingSimilarityPolicy) for p in active_policies)
-        if has_semantic_policy:
+        if any(isinstance(p, EmbeddingSimilarityPolicy) for p in active_policies):
             prompt_embedding = self.embedding_model.encode(modified_prompt, convert_to_tensor=True)
 
         for policy in active_policies:
@@ -61,8 +58,7 @@ class Warden:
             elif isinstance(policy, EmbeddingSimilarityPolicy):
                 ref_embedding = torch.tensor(policy.reference_embedding).to(self.device)
                 sim_scores = util.cos_sim(prompt_embedding, ref_embedding)
-                sim = sim_scores[0][0].item()
-                if sim >= policy.similarity_threshold: triggered = True
+                if sim_scores[0][0].item() >= policy.similarity_threshold: triggered = True
             
             if triggered and policy.action in [PolicyAction.BLOCK, PolicyAction.FLAG_FOR_REVIEW]:
                 triggered_actions[policy.action] = policy
@@ -73,36 +69,31 @@ class Warden:
             
         return PolicyAction.ALLOW, None, modified_prompt
 
-    def process(self, prompt: str) -> Dict[str, Any]:
-        """Applies policies, then (if allowed) queries the base LLM."""
+    def process(self, prompt: str, **kwargs) -> Dict[str, Any]:
+        """Applies policies, then queries the base LLM."""
         action, triggering_policy, final_prompt = self._apply_policies(prompt)
         
         if action == PolicyAction.BLOCK:
-            return {"status": "BLOCKED", "response": "This request was blocked by a safety policy.", "policy_id": triggering_policy.id, "policy_description": triggering_policy.description}
+            return {"status": "BLOCKED", "response": "This request was blocked by a safety policy.", "policy_id": triggering_policy.id if triggering_policy else None, "policy_description": triggering_policy.description if triggering_policy else None}
         
         flagged_by = None
         if action == PolicyAction.FLAG_FOR_REVIEW: flagged_by = triggering_policy.id
         if action == PolicyAction.REWRITE: print(f"Warden: Request REWRITTEN by policy {triggering_policy.id}")
         
-        print(f"Warden: Request ALLOWED. Processing with base LLM...")
+        print(f"Warden: Request ALLOWED. Processing with real base LLM...")
         
-        messages = [{"role": "system", "content": "You are a helpful AI assistant."}, {"role": "user", "content": final_prompt}]
+        inputs = self.tokenizer(final_prompt, return_tensors="pt").to(self.model.device)
         
-        inputs = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt").to(self.model.device)
-        
-        # --- IMPROVEMENT: Explicitly create attention_mask to suppress warnings ---
-        attention_mask = torch.ones_like(inputs)
-
         outputs = self.model.generate(
-            inputs,
-            attention_mask=attention_mask, # Pass the mask here
+            **inputs,
             max_new_tokens=256,
             do_sample=True,
             temperature=0.6,
             top_p=0.9,
-            pad_token_id=self.tokenizer.eos_token_id # Explicitly set pad token
+            pad_token_id=self.tokenizer.eos_token_id
         )
-        response_text = self.tokenizer.decode(outputs[0][inputs.shape[-1]:], skip_special_tokens=True)
+        full_response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        response_text = full_response[len(final_prompt):].strip()
         
         return {
             "status": "ALLOWED", "response": response_text, "original_prompt": prompt, "final_prompt": final_prompt,
