@@ -1,0 +1,13 @@
+# configs/experiment/sisf_full_system.yaml
+
+# A unique name for this experimental run
+name: "SISF_Full_System_Evaluation"
+
+# A brief description of what this experiment does
+description: "Evaluates the fully operational SISF architecture with all components enabled."
+
+# This key tells our future experiment script which system to test
+defense_system_type: "sisf"
+
+# The network address of our running SISF application
+api_endpoint: "http://localhost:8000"
