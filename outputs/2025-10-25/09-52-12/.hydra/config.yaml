@@ -1,0 +1,10 @@
+data:
+  adversarial_path: data/processed/advbench_subset.csv
+  benign_path: data/processed/hh_rlhf_subset.csv
+num_prompts_to_test: 520
+output_dir: outputs
+experiment:
+  name: Baseline_No_Defense_Evaluation
+  description: Evaluates the unprotected Warden LLM to establish baseline vulnerability.
+  defense_system_type: no_defense
+  api_endpoint: http://localhost:8000

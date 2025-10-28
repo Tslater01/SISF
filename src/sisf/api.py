@@ -1,12 +1,14 @@
 # src/sisf/api.py
 """
-Main API entrypoint for the SISF.
+Main API entrypoint for the SISF. This version manages a history of
+recent attacks to guide the APA and prevent mode collapse.
 """
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import os
 from typing import List, Optional
 from dotenv import load_dotenv
+from collections import deque # Import deque for an efficient sliding window
 
 from sisf.components.warden import Warden
 from sisf.components.adjudicator import EnsembleAdjudicator, AdjudicationResult
@@ -32,16 +34,20 @@ print(f"PSM Model:         {PSM_MODEL}")
 print(f"APA Model:         {APA_MODEL}")
 print("--------------------------")
 
+# --- Component Initialization ---
 policy_store: PolicyStore = PolicyStore()
-# THE FIX IS ON THE NEXT LINE: Switched to the more vulnerable Llama-2 model for testing.
 warden: Warden = Warden(model_name="mistralai/Mistral-7B-v0.1", policy_store=policy_store)
 adjudicator: EnsembleAdjudicator = EnsembleAdjudicator(api_key=OPENAI_API_KEY, model=ADJUDICATOR_MODEL)
 psm: PolicySynthesisModule = PolicySynthesisModule(api_key=OPENAI_API_KEY, model=PSM_MODEL)
 apa: AdversarialProbingAgent = AdversarialProbingAgent(api_key=OPENAI_API_KEY, model=APA_MODEL)
 
+# --- NEW: In-memory state for attack history ---
+# A deque with maxlen=5 is a perfect sliding window for the last 5 attempts
+attack_history = deque(maxlen=5)
+
 class ChatRequest(BaseModel): 
     prompt: str
-    prompt_id: str = "" # Add prompt_id for experimental control if needed
+    prompt_id: str = ""
 
 class ChatResponse(BaseModel): 
     status: str
@@ -61,9 +67,18 @@ async def handle_chat(request: ChatRequest):
 
 @app.post("/v1/internal/run_adaptive_cycle", response_model=LoopCycleResponse, tags=["Internal Loop"])
 async def run_adaptive_cycle():
+    """Executes a single cycle of the self-improvement loop, now with memory."""
     print("\n--- SISF: Starting new adaptive cycle ---")
-    prompt = apa.generate_prompt()
+    
+    # --- IMPROVEMENT: Pass the recent history to the APA ---
+    prompt = apa.generate_prompt(history=list(attack_history))
+    
     warden_output = warden.process(prompt)
+    
+    # --- IMPROVEMENT: Determine the outcome and save it to history ---
+    final_status = "BLOCKED" if warden_output['status'] == 'BLOCKED' else "ALLOWED"
+    attack_history.append((prompt, final_status))
+    
     adjudication = adjudicator.analyze(prompt, warden_output["response"])
     new_policy_obj = None
     if adjudication.is_breach:
