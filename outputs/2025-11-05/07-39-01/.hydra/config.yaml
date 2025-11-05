@@ -1,0 +1,12 @@
+data:
+  adversarial_path: data/processed/advbench_subset.csv
+  benign_path: data/processed/hh_rlhf_subset.csv
+num_prompts_to_test: 520
+output_dir: outputs
+experiment:
+  name: SISF_Full_System_Evaluation
+  description: Evaluates the fully operational SISF architecture with all components
+    enabled.
+  defense_system_type: sisf
+  api_endpoint: http://localhost:8000
+dataset: benign
