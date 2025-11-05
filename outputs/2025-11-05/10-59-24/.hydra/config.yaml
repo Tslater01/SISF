@@ -1,0 +1,11 @@
+data:
+  adversarial_path: data/processed/advbench_subset.csv
+  benign_path: data/processed/hh_rlhf_subset.csv
+num_prompts_to_test: 520
+output_dir: outputs
+experiment:
+  name: Baseline_Keyword_Filter_Evaluation
+  description: Evaluates a static keyword-based defense.
+  defense_system_type: keyword_filter
+  api_endpoint: http://localhost:8000
+dataset: adversarial
