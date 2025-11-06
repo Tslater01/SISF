@@ -1,6 +1,6 @@
 # A Self-Improving Architecture for Dynamic Safety in Large Language Models
 
-**Status:** 🚧 Work in Progress 🚧
+**Status:** 🚧 Writing Paper 🚧
 
 This repository contains the source code, experimental data, and analysis scripts for the research paper, "A Self-Improving Architecture for Dynamic Safety in Large Language Models".
 
