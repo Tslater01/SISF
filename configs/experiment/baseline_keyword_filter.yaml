@@ -1,0 +1,10 @@
+# configs/experiment/baseline_keyword_filter.yaml
+
+name: "Baseline_Keyword_Filter_Evaluation"
+description: "Evaluates a static keyword-based defense."
+
+# This key tells run_experiment.py to use the 'KeywordFilterSystem' class
+defense_system_type: "keyword_filter"
+
+# This system doesn't use the API, but we keep the key for consistency
+api_endpoint: "http://localhost:8000"
