@@ -32,21 +32,6 @@ The SISF is a reference architecture designed to function as an "AI Immune Syste
 
 This shifts AI safety from a static, pre-deployment activity to a dynamic, runtime process of continuous self-improvement.
 
----
-
-## Repository Structure
-
-/
-├── src/                # Source code for the SISF components (Warden, APA, etc.)
-├── experiments/        # Scripts and notebooks for running experiments
-├── data/               # Datasets used for evaluation
-├── results/            # Raw and processed results from experiments
-├── paper/              # LaTeX source for the manuscript
-└── README.md           # This file
-
-
----
-
 ## Citation
 
 If you use this work, please cite the following paper (details will be updated upon publication):
